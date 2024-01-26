@@ -1,35 +1,51 @@
-name: Autograding Workflow
+name: Conditional Autograding Workflow
 
-on: 
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+on: [push, pull_request]  # Trigger the workflow on push and pull request events
 
 jobs:
-  run-tests:
-    runs-on: ubuntu-latest
-
+  setup-matrix:
+    runs-on: ubuntu-latest  # Specifies the runner to use
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}  # Defines the output of this job to be used in other jobs
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v2
+      - name: Checkout Repository
+        uses: actions/checkout@v2  # Checks out the repository code
+        with:
+          fetch-depth: 0  # Fetches all history for all branches and tags
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.10'
+      - name: Find Modified Solutions
+        id: set-matrix  # An identifier for the step to refer to its outputs
+        run: |
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} || echo "")
+          MATRIX_JSON="[]"
+          echo "Changed files: $CHANGED_FILES"
+          for FILE in $CHANGED_FILES; do
+            if [[ "$FILE" == "solutions/"* ]]; then
+              TEST_NAME=$(basename ${FILE%_template.py})
+              echo "Adding $TEST_NAME to the test matrix"
+              MATRIX_JSON=$(echo $MATRIX_JSON | jq '. += [{"test": "tests/test_'$TEST_NAME'.py"}]')
+            fi
+          done
+          echo "MATRIX_JSON=${MATRIX_JSON}" >> $GITHUB_ENV  # Sets the matrix JSON in the environment variable
 
-    - name: Install Dependencies
-      run: |
-        pip install -r requirements.txt
+  run-tests:
+    needs: setup-matrix  # Indicates that this job needs to wait for setup-matrix to complete
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(env.MATRIX_JSON)}}  # Constructs a matrix from the JSON in the environment variable
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
 
-    - name: Run Test for Problem 1
-      run: python -m unittest tests/test_problem1.py
+      - name: Set up Python
+        uses: actions/setup-python@v2  # Sets up the Python environment
+        with:
+          python-version: '3.10'  # Specifies the Python version to use
 
-    - name: Run Test for Problem 2
-      run: python -m unittest tests/test_problem2.py
+      - name: Modify PYTHONPATH
+        run: echo "PYTHONPATH=$PYTHONPATH:${{ github.workspace }}/solutions" >> $GITHUB_ENV  # Modifies PYTHONPATH to include the solutions directory
 
-    - name: Run Test for Problem 3
-      run: python -m unittest tests/test_problem3.py
+      - name: Run Tests Based on Matrix
+        if: ${{ matrix.test }}  # Runs this step only if there is a test to run
+        run: python -m unittest ${{ matrix.test }}  # Runs the unittest command on the test file
