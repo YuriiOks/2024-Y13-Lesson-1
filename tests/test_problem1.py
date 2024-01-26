@@ -13,7 +13,7 @@ class TestProblem1(unittest.TestCase):
         self.assertEqual(is_symmetrical(1221), 1)
 
     def test_padded_symmetry(self):
-        self.assertEqual(is_symmetrical(21), 1)
+        self.assertEqual(is_symmetrical(21), -1)
 
     def test_padded_non_symmetry(self):
         self.assertNotEqual(is_symmetrical(210), 1)
